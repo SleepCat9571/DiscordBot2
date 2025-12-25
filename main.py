@@ -3,13 +3,31 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 import os
+import requests
 import threading
 import random
 import asyncio
 from flask import Flask
+from deep_translator import GoogleTranslator
 
 # --- 1. 設定（環境変数の読み込み） ---
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("DISCORD_TOKEN")
+
+def get_id(key):
+    val = os.getenv(key)
+    return int(val) if val and val.isdigit() else None
+
+CH_IDS = {
+    "news": get_id("CH_NEWS"),
+    "greeting": get_id("CH_GREETING"),
+    "log": get_id("CH_LOG"),
+    "welcome": get_id("CH_WELCOME"),
+    "guard": get_id("CH_GUARD"),
+    "verify": get_id("CH_VERIFY"),
+}
+
+BAD_WORDS = ["死ね", "殺す", "バカ", "ゴミ", "カス"]
+WEATHER_AREAS = {"東京": "130000", "大阪": "270000", "福岡": "400000", "札幌": "016000"}
 
 # --- 2. Flask（Render稼働維持用） ---
 app = Flask('')
@@ -24,7 +42,6 @@ def run_web():
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
-        # command_prefix は ! に設定
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
@@ -36,44 +53,102 @@ class MyBot(commands.Bot):
     async def on_ready(self):
         print(f"✅ ログイン成功: {self.user.name}")
 
-    # 定期実行タスク（挨拶など）
+    # --- 定期タスク (08:00天気 / 12:00挨拶) ---
     @tasks.loop(seconds=60)
     async def scheduled_task(self):
         jst = timezone(timedelta(hours=9), 'JST')
         now = datetime.now(jst).strftime('%H:%M')
-        if now == "08:00":
-            print("朝の定期処理を実行します")
 
-    # メッセージを受け取った時の処理（クラス内なので self を使う）
+        # 朝 08:00 天気
+        if now == "08:00" and CH_IDS["news"]:
+            ch = self.get_channel(CH_IDS["news"])
+            if ch:
+                msg = "🌅 **朝の全国天気予報**\n"
+                for area, code in WEATHER_AREAS.items():
+                    try:
+                        url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{code}.json"
+                        res = requests.get(url).json()
+                        w = res[0]['timeSeries'][0]['areas'][0]['weathers'][0]
+                        msg += f"・{area}: {w}\n"
+                    except: msg += f"・{area}: 取得失敗\n"
+                await ch.send(msg)
+
+        # 昼 12:00 挨拶
+        if now == "12:00" and CH_IDS["greeting"]:
+            ch = self.get_channel(CH_IDS["greeting"])
+            if ch: await ch.send("🍱 12:00になりました。お昼休憩にしましょう！")
+
+    # --- イベント処理 ---
+    async def on_member_join(self, member):
+        ch = self.get_channel(CH_IDS["welcome"])
+        if ch: await ch.send(f"🎊 {member.mention} さん、サーバーへようこそ！")
+
+    async def on_voice_state_update(self, member, before, after):
+        ch = self.get_channel(CH_IDS["log"])
+        if not ch: return
+        if before.channel is None and after.channel is not None:
+            await ch.send(f"🎤 **{member.display_name}** が `{after.channel.name}` に参加")
+        elif before.channel is not None and after.channel is None:
+            await ch.send(f"👋 **{member.display_name}** が退出")
+
     async def on_message(self, message):
-        if message.author.bot:
-            return
+        if message.author.bot: return
+        # 禁止用語監視
+        if any(word in message.content for word in BAD_WORDS):
+            try:
+                await message.delete()
+                await message.author.timeout(timedelta(minutes=10), reason="禁止用語使用")
+                log = self.get_channel(CH_IDS["guard"])
+                if log: await log.send(f"🛡️ {message.author.mention} を禁止用語使用で10分ミュートしました。")
+            except: pass
         await self.process_commands(message)
 
-# ボットのインスタンスを作成
 bot = MyBot()
 
-# --- 4. スラッシュコマンド（ここからは bot.tree を使う） ---
+# --- 4. スラッシュコマンド ---
 
-@bot.tree.command(name="omikuji", description="おみくじを引きます")
+@bot.tree.command(name="omikuji", description="今日のおみくじを引きます")
 async def omikuji(interaction: discord.Interaction):
-    res = random.choice(["大吉", "中吉", "小吉", "吉", "凶"])
-    await interaction.response.send_message(f"🔮 運勢は **{res}** です！")
+    res = random.choice(["大吉", "中吉", "小吉", "末吉", "凶"])
+    await interaction.response.send_message(f"🔮 {interaction.user.mention} さんの運勢は **{res}** です！")
 
-@bot.tree.command(name="timer", description="指定した秒数後にメンションします")
+@bot.tree.command(name="timer", description="指定秒数後に通知します")
 async def timer(interaction: discord.Interaction, 秒: int):
-    await interaction.response.send_message(f"⏰ {秒}秒のタイマーを開始しました。")
+    await interaction.response.send_message(f"⏰ {秒}秒のタイマーを開始。")
     await asyncio.sleep(秒)
     await interaction.channel.send(f"🔔 {interaction.user.mention} 時間になりました！")
 
+@bot.tree.command(name="translate", description="文章を日本語に翻訳します")
+async def translate(interaction: discord.Interaction, text: str):
+    try:
+        translated = GoogleTranslator(source='auto', target='ja').translate(text)
+        await interaction.response.send_message(f"🌐 **翻訳結果**:\n{translated}")
+    except:
+        await interaction.response.send_message("翻訳に失敗しました。", ephemeral=True)
+
+@bot.tree.command(name="verify", description="サーバーの認証（ロール付与）を行います")
+async def verify(interaction: discord.Interaction):
+    if interaction.channel_id != CH_IDS["verify"]:
+        return await interaction.response.send_message("専用の認証チャンネルで使ってください。", ephemeral=True)
+    role = discord.utils.get(interaction.guild.roles, name="Member")
+    if role:
+        await interaction.user.add_roles(role)
+        await interaction.response.send_message("✅ 認証完了！ロールを付与しました。", ephemeral=True)
+    else:
+        await interaction.response.send_message("⚠️ 'Member'ロールが見つかりません。", ephemeral=True)
+
+# 管理者用：強制コマンド同期 (!sync)
+@bot.command()
+@commands.is_owner()
+async def sync(ctx):
+    await bot.tree.sync()
+    await ctx.send("✅ スラッシュコマンドを同期しました。")
+
 # --- 5. 実行処理 ---
 if __name__ == "__main__":
-    # Webサーバー起動
     t = threading.Thread(target=run_web, daemon=True)
     t.start()
-
     if TOKEN:
-        print("🤖 Botの起動を開始します...")
         bot.run(TOKEN)
     else:
-        print("❌ トークンが見つかりません。RenderのEnvironment設定を確認してください。")
+        print("❌ トークンが見つかりません。")

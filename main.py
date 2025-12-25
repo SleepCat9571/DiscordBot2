@@ -1,118 +1,123 @@
 import discord
 from discord.ext import commands, tasks
 import datetime
-import random
 import asyncio
 import os
+import random
 from flask import Flask
 from threading import Thread
 
-# --- [1. 環境変数の読み込み] ---
-# RenderのEnvironment Variablesから取得
-TOKEN = os.getenv("DISCORD_TOKEN")
-
-def get_ch(key):
-    """環境変数からIDを読み込み、数値として返す"""
-    value = os.getenv(key)
-    return int(value) if value and value.isdigit() else None
-
-# --- [2. Render用：スリープ防止サーバー] ---
+# --- [1. Render用 Webサーバー] ---
+# Renderは外部からのアクセス（ポート8080）がないとスリープするため必須です
 app = Flask('')
+
 @app.route('/')
-def home(): return "Bot is Online!"
-def run(): app.run(host='0.0.0.0', port=8080)
+def home():
+    return "Bot is alive!"
+
+def run_flask():
+    # Renderのポート指定に対応
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
 def keep_alive():
-    t = Thread(target=run)
+    t = Thread(target=run_flask)
     t.start()
 
-# --- [3. Bot基本設定] ---
+# --- [2. 設定の読み込み] ---
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+def get_ch_id(key):
+    val = os.getenv(key)
+    return int(val) if val and val.isdigit() else None
+
+# --- [3. Botの基本設定] ---
 intents = discord.Intents.all()
+# コマンドの開始文字を「!」に設定
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user.name}')
-    daily_schedule.start()
-    keep_alive()
+    print(f'✅ ログインしました: {bot.user.name}')
+    # 定期実行タスクの開始
+    if not daily_schedule.is_running():
+        daily_schedule.start()
 
-# --- [4. 定期通知系 (ニュース/天気/挨拶)] ---
-@tasks.loop(minutes=1)
+# --- [4. 定期通知 (ニュース・挨拶)] ---
+@tasks.loop(seconds=60)
 async def daily_schedule():
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime('%H:%M')
     
-    # 08:00 ニュース＆天気
     if now == "08:00":
-        ch_id = get_ch("CH_NEWS")
-        ch = bot.get_channel(ch_id)
-        if ch: await ch.send("📢 **朝の定期通知**\n☀️【全国天気】東京:晴 大阪:曇 福岡:雨\n📰【最新ニュース】本日注目のトピックをお届けします。")
+        ch = bot.get_channel(get_ch_id("CH_NEWS"))
+        if ch: await ch.send("📢 **朝の通知**\n☀️【全国天気】晴れのち曇り\n📰【ニュース】最新情報をチェックしましょう！")
 
-    # 12:00 お昼休憩
-    elif now == "12:00":
-        ch_id = get_ch("CH_GREETING")
-        ch = bot.get_channel(ch_id)
-        if ch: await ch.send("🍱 12:00になりました。お昼休憩の時間です！")
+    if now == "12:00":
+        ch = bot.get_channel(get_ch_id("CH_GREETING"))
+        if ch: await ch.send("🍱 12:00です。お昼休みですよ！")
 
-# --- [5. イベント監視系] ---
+# --- [5. コマンド機能] ---
 
-# 管理ログ (VC入退室)
+@bot.command(name="おみくじ")
+async def omikuji(ctx):
+    # 環境変数で指定したチャンネルのみで反応
+    if ctx.channel.id == get_ch_id("CH_ENTAME"):
+        res = random.choice(["大吉", "中吉", "小吉", "吉", "凶"])
+        await ctx.send(f"🔮 {ctx.author.mention} さんの運勢は **{res}** です！")
+
+@bot.command(name="タイマー")
+async def timer(ctx, sec: int):
+    if ctx.channel.id == get_ch_id("CH_TIMER"):
+        await ctx.send(f"⏰ {sec}秒のタイマーを開始します。")
+        await asyncio.sleep(sec)
+        await ctx.send(f"🔔 {ctx.author.mention} 時間になりました！")
+
+@bot.command(name="認証")
+async def verify(ctx):
+    if ctx.channel.id == get_ch_id("CH_VERIFY"):
+        role = discord.utils.get(ctx.guild.roles, name="認証済み")
+        if role:
+            await ctx.author.add_roles(role)
+            await ctx.send(f"✅ {ctx.author.mention} 認証が完了し、ロールを付与しました。")
+        else:
+            await ctx.send("⚠️ 「認証済み」という名前のロールが見つかりません。サーバー設定で作ってください。")
+
+@bot.command(name="おすすめ動画")
+async def youtube_notify(ctx):
+    ch = bot.get_channel(get_ch_id("CH_YOUTUBE"))
+    if ch:
+        await ch.send("🎥 本日のおすすめ動画はこちら！\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+# --- [6. イベント監視] ---
+
 @bot.event
 async def on_voice_state_update(member, before, after):
-    ch_id = get_ch("CH_LOG")
-    log_ch = bot.get_channel(ch_id)
+    log_ch = bot.get_channel(get_ch_id("CH_LOG"))
     if not log_ch: return
     if before.channel is None and after.channel is not None:
-        await log_ch.send(f"🔊 入室: {member.mention} が `{after.channel.name}` に入りました。")
+        await log_ch.send(f"🔊 {member.name} が `{after.channel.name}` に入室。")
     elif before.channel is not None and after.channel is None:
-        await log_ch.send(f"🔇 退室: {member.mention} が `{before.channel.name}` から出ました。")
+        await log_ch.send(f"🔇 {member.name} が退出。")
 
-# 自動守護 (NGワード)
 @bot.event
 async def on_message(message):
     if message.author.bot: return
-    NG_WORDS = ["禁止語1", "禁止語2"] # これも環境変数化可能
-    if any(word in message.content for word in NG_WORDS):
+    
+    # NGワード削除
+    NG_WORDS = ["禁止語1", "禁止語2"]
+    if any(w in message.content for w in NG_WORDS):
         await message.delete()
-        ch_id = get_ch("CH_GUARD")
-        guard_ch = bot.get_channel(ch_id)
-        if guard_ch: await guard_ch.send(f"⚠️ {message.author.mention} 禁止用語検知。10分ミュート。")
+        ch = bot.get_channel(get_ch_id("CH_GUARD"))
+        if ch: await ch.send(f"⚠️ {message.author.mention} が禁止用語を使用。10分ミュート。")
         until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
-        await message.author.timeout(until, reason="禁止用語使用")
+        await message.author.timeout(until)
+
+    # これがないとコマンド(!おみくじ等)が動かなくなる
     await bot.process_commands(message)
 
-# 歓迎・離脱
-@bot.event
-async def on_member_join(member):
-    ch_id = get_ch("CH_WELCOME")
-    ch = bot.get_channel(ch_id)
-    if ch: await ch.send(f"🎉 {member.mention} さん、いらっしゃいませ！")
-
-# --- [6. コマンド系] ---
-
-@bot.command()
-async def おみくじ(ctx):
-    if ctx.channel.id != get_ch("CH_ENTAME"): return
-    res = random.choice(["大吉", "中吉", "小吉", "末吉", "凶"])
-    await ctx.send(f"🔮 {ctx.author.mention} さんの運勢は **{res}** です！")
-
-@bot.command()
-async def タイマー(ctx, sec: int):
-    if ctx.channel.id != get_ch("CH_TIMER"): return
-    await ctx.send(f"⏰ {sec}秒のタイマーを開始。")
-    await asyncio.sleep(sec)
-    await ctx.send(f"🔔 {ctx.author.mention} 時間になりました！")
-
-@bot.command()
-async def 認証(ctx):
-    if ctx.channel.id != get_ch("CH_VERIFY"): return
-    role = discord.utils.get(ctx.guild.roles, name="認証済み")
-    if role:
-        await ctx.author.add_roles(role)
-        await ctx.send(f"✅ {ctx.author.mention} 認証完了。")
-
-@bot.command()
-async def おすすめ動画(ctx):
-    ch_id = get_ch("CH_YOUTUBE")
-    ch = bot.get_channel(ch_id)
-    if ch: await ch.send("🎥 本日のおすすめ： https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-
-bot.run(TOKEN)
+# --- [7. 起動] ---
+keep_alive() # Webサーバーを先に起動
+try:
+    bot.run(TOKEN)
+except Exception as e:
+    print(f"❌ エラーが発生しました: {e}")

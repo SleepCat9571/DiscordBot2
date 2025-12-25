@@ -66,7 +66,7 @@ class MyBot(commands.Bot):
         print(f"時刻チェック: {current_time}")
 
         # 朝 08:00 配信
-        if current_time == "08:00" and CH_IDS["news"]:
+        if current_time == "18:35" and CH_IDS["news"]:
             ch = self.get_channel(CH_IDS["news"])
             if ch:
                 # 天気取得

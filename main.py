@@ -60,7 +60,7 @@ class MyBot(commands.Bot):
         now = datetime.now(jst).strftime('%H:%M')
 
         # 朝 08:00 実行
-        if now == "08:00" and CH_IDS["news"]:
+        if now == "18:10" and CH_IDS["news"]:
             ch = self.get_channel(CH_IDS["news"])
             if not ch: return
 

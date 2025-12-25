@@ -7,10 +7,11 @@ import requests
 import threading
 import random
 import asyncio
+import xml.etree.ElementTree as ET
 from flask import Flask
 from deep_translator import GoogleTranslator
 
-# --- 1. 設定（環境変数の読み込み） ---
+# --- 1. 環境変数の読み込み ---
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("DISCORD_TOKEN")
 
 def get_id(key):
@@ -45,7 +46,7 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # 起動時にスラッシュコマンドを同期
+        # 起動時にスラッシュコマンドをDiscordに同期
         await self.tree.sync()
         if not self.scheduled_task.is_running():
             self.scheduled_task.start()
@@ -53,51 +54,45 @@ class MyBot(commands.Bot):
     async def on_ready(self):
         print(f"✅ ログイン成功: {self.user.name}")
 
-# --- 定期タスク (08:00 ニュース＆天気) ---
+    # --- 定期タスク (08:00 ニュース＆天気 / 12:00 挨拶) ---
     @tasks.loop(seconds=60)
     async def scheduled_task(self):
+        # 強制的に日本時間を取得
         jst = timezone(timedelta(hours=9), 'JST')
-        now = datetime.now(jst).strftime('%H:%M')
+        now_jst = datetime.now(jst)
+        current_time = now_jst.strftime('%H:%M')
+        
+        # ログで時間を確認
+        print(f"時刻チェック: {current_time}")
 
-        # 朝 08:00 実行
-        if now == "18:10" and CH_IDS["news"]:
+        # 朝 08:00 配信
+        if current_time == "08:00" and CH_IDS["news"]:
             ch = self.get_channel(CH_IDS["news"])
-            if not ch: return
+            if ch:
+                # 天気取得
+                w_msg = "🌅 **朝の定期連絡 (天気)**\n"
+                for area, code in WEATHER_AREAS.items():
+                    try:
+                        res = requests.get(f"https://www.jma.go.jp/bosai/forecast/data/forecast/{code}.json", timeout=5).json()
+                        w = res[0]['timeSeries'][0]['areas'][0]['weathers'][0]
+                        w_msg += f"・{area}: {w}\n"
+                    except: w_msg += f"・{area}: 取得失敗\n"
 
-            # --- A. 天気予報の取得 ---
-            weather_msg = "🌅 **朝の定期連絡です**\n\n🌡️ **各地の天気**\n"
-            for area, code in WEATHER_AREAS.items():
+                # ニュース取得 (Google News RSS)
+                n_msg = "\n📰 **最新のニュース速報**\n"
                 try:
-                    w_url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{code}.json"
-                    res = requests.get(w_url).json()
-                    w = res[0]['timeSeries'][0]['areas'][0]['weathers'][0]
-                    weather_msg += f"・{area}: {w}\n"
-                except: weather_msg += f"・{area}: 取得失敗\n"
-
-            # --- B. ニュース速報の取得 (Google News RSS) ---
-            news_msg = "\n📰 **最新の主要ニュース**\n"
-            try:
-                # 日本の主要ニュースRSS
-                news_url = "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja"
-                from bs4 import BeautifulSoup
-                import xml.etree.ElementTree as ET
-
-                res = requests.get(news_url)
-                root = ET.fromstring(res.text)
-                # 上位5件を取得
-                for item in root.findall('.//item')[:5]:
-                    title = item.find('title').text
-                    link = item.find('link').text
-                    news_msg += f"・{title}\n<{link}>\n"
-            except Exception as e:
-                news_msg += "ニュースの取得中にエラーが発生しました。"
-                print(f"News Error: {e}")
-
-            # まとめて送信
-            await ch.send(weather_msg + news_msg)
+                    res = requests.get("https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja", timeout=10)
+                    root = ET.fromstring(res.text)
+                    for item in root.findall('.//item')[:5]:
+                        title = item.find('title').text.rsplit(' - ', 1)[0]
+                        link = item.find('link').text
+                        n_msg += f"・{title}\n<{link}>\n"
+                except: n_msg += "ニュース取得エラー\n"
+                
+                await ch.send(w_msg + n_msg)
 
         # 昼 12:00 挨拶
-        if now == "12:00" and CH_IDS["greeting"]:
+        if current_time == "12:00" and CH_IDS["greeting"]:
             ch = self.get_channel(CH_IDS["greeting"])
             if ch: await ch.send("🍱 12:00になりました。お昼休憩にしましょう！")
 
@@ -126,9 +121,10 @@ class MyBot(commands.Bot):
             except: pass
         await self.process_commands(message)
 
+# インスタンス作成
 bot = MyBot()
 
-# --- 4. スラッシュコマンド ---
+# --- 4. スラッシュコマンド登録 ---
 
 @bot.tree.command(name="omikuji", description="今日のおみくじを引きます")
 async def omikuji(interaction: discord.Interaction):
@@ -160,18 +156,16 @@ async def verify(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("⚠️ 'Member'ロールが見つかりません。", ephemeral=True)
 
-# 管理者用：強制コマンド同期 (!sync)
+# 管理者用同期コマンド (!sync)
 @bot.command()
 @commands.is_owner()
 async def sync(ctx):
     await bot.tree.sync()
     await ctx.send("✅ スラッシュコマンドを同期しました。")
 
-# --- 5. 実行処理 ---
+# --- 5. 起動 ---
 if __name__ == "__main__":
     t = threading.Thread(target=run_web, daemon=True)
     t.start()
     if TOKEN:
         bot.run(TOKEN)
-    else:
-        print("❌ トークンが見つかりません。")

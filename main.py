@@ -53,25 +53,48 @@ class MyBot(commands.Bot):
     async def on_ready(self):
         print(f"✅ ログイン成功: {self.user.name}")
 
-    # --- 定期タスク (08:00天気 / 12:00挨拶) ---
+# --- 定期タスク (08:00 ニュース＆天気) ---
     @tasks.loop(seconds=60)
     async def scheduled_task(self):
         jst = timezone(timedelta(hours=9), 'JST')
         now = datetime.now(jst).strftime('%H:%M')
 
-        # 朝 08:00 天気
+        # 朝 08:00 実行
         if now == "08:00" and CH_IDS["news"]:
             ch = self.get_channel(CH_IDS["news"])
-            if ch:
-                msg = "🌅 **朝の全国天気予報**\n"
-                for area, code in WEATHER_AREAS.items():
-                    try:
-                        url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{code}.json"
-                        res = requests.get(url).json()
-                        w = res[0]['timeSeries'][0]['areas'][0]['weathers'][0]
-                        msg += f"・{area}: {w}\n"
-                    except: msg += f"・{area}: 取得失敗\n"
-                await ch.send(msg)
+            if not ch: return
+
+            # --- A. 天気予報の取得 ---
+            weather_msg = "🌅 **朝の定期連絡です**\n\n🌡️ **各地の天気**\n"
+            for area, code in WEATHER_AREAS.items():
+                try:
+                    w_url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{code}.json"
+                    res = requests.get(w_url).json()
+                    w = res[0]['timeSeries'][0]['areas'][0]['weathers'][0]
+                    weather_msg += f"・{area}: {w}\n"
+                except: weather_msg += f"・{area}: 取得失敗\n"
+
+            # --- B. ニュース速報の取得 (Google News RSS) ---
+            news_msg = "\n📰 **最新の主要ニュース**\n"
+            try:
+                # 日本の主要ニュースRSS
+                news_url = "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja"
+                from bs4 import BeautifulSoup
+                import xml.etree.ElementTree as ET
+
+                res = requests.get(news_url)
+                root = ET.fromstring(res.text)
+                # 上位5件を取得
+                for item in root.findall('.//item')[:5]:
+                    title = item.find('title').text
+                    link = item.find('link').text
+                    news_msg += f"・{title}\n<{link}>\n"
+            except Exception as e:
+                news_msg += "ニュースの取得中にエラーが発生しました。"
+                print(f"News Error: {e}")
+
+            # まとめて送信
+            await ch.send(weather_msg + news_msg)
 
         # 昼 12:00 挨拶
         if now == "12:00" and CH_IDS["greeting"]:

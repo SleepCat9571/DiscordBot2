@@ -125,38 +125,29 @@ class MyBot(commands.Bot):
 # インスタンス作成
 bot = MyBot()
 
-# --- 4. スラッシュコマンド登録 ---
-
-@bot.tree.command(name="omikuji", description="今日のおみくじを引きます")
-async def omikuji(interaction: discord.Interaction):
-    res = random.choice(["大吉", "中吉", "小吉", "末吉", "凶"])
-    await interaction.response.send_message(f"🔮 {interaction.user.mention} さんの運勢は **{res}** です！")
-
-@bot.tree.command(name="timer", description="指定秒数後に通知します")
-async def timer(interaction: discord.Interaction, 秒: int):
-    await interaction.response.send_message(f"⏰ {秒}秒のタイマーを開始。")
-    await asyncio.sleep(秒)
-    await interaction.channel.send(f"🔔 {interaction.user.mention} 時間になりました！")
-
-@bot.tree.command(name="translate", description="文章を日本語に翻訳します")
-async def translate(interaction: discord.Interaction, text: str):
-    try:
-        translated = GoogleTranslator(source='auto', target='ja').translate(text)
-        await interaction.response.send_message(f"🌐 **翻訳結果**:\n{translated}")
-    except:
-        await interaction.response.send_message("翻訳に失敗しました。", ephemeral=True)
-
 @bot.tree.command(name="verify", description="サーバーの認証（ロール付与）を行います")
 async def verify(interaction: discord.Interaction):
+    # 3秒ルール対策：まず「考え中...」状態にする
+    await interaction.response.defer(ephemeral=True)
+    
     if interaction.channel_id != CH_IDS["verify"]:
-        return await interaction.response.send_message("専用の認証チャンネルで使ってください。", ephemeral=True)
+        return await interaction.followup.send("専用の認証チャンネルで使ってください。", ephemeral=True)
+    
     role = discord.utils.get(interaction.guild.roles, name="Member")
     if role:
         await interaction.user.add_roles(role)
-        await interaction.response.send_message("✅ 認証完了！ロールを付与しました。", ephemeral=True)
+        await interaction.followup.send("✅ 認証完了！ロールを付与しました。", ephemeral=True)
     else:
-        await interaction.response.send_message("⚠️ 'Member'ロールが見つかりません。", ephemeral=True)
+        await interaction.followup.send("⚠️ 'Member'ロールが見つかりません。", ephemeral=True)
 
+@bot.tree.command(name="timer", description="指定秒数後に通知します")
+async def timer(interaction: discord.Interaction, 秒: int):
+    # 応答を保留にする
+    await interaction.response.send_message(f"⏰ {秒}秒のタイマーを開始。")
+    await asyncio.sleep(秒)
+    # 3秒以上かかる処理の後は followup または channel.send を使う
+    await interaction.channel.send(f"🔔 {interaction.user.mention} 時間になりました！")
+    
 # 管理者用同期コマンド (!sync)
 @bot.command()
 @commands.is_owner()

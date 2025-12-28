@@ -186,3 +186,7 @@ if __name__ == "__main__":
                 ch = self.get_channel(ch_id)
                 if ch:
                     await ch.send("📢 **Disboardリマインダー**\n前回のbumpから2時間が経過しました！\n`/bump` を実行してサーバーを浮上させましょう！")
+
+@bot.tree.command(name="test_bump", description="Bumpリマインダーの表示テスト")
+async def test_bump(interaction: discord.Interaction):
+    await interaction.response.send_message("📢 **Disboardリマインダー（テスト）**\n`/bump` の時間です！", ephemeral=False)

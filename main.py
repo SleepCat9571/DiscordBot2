@@ -25,6 +25,7 @@ CH_IDS = {
     "welcome": get_id("CH_WELCOME"),
     "guard": get_id("CH_GUARD"),
     "verify": get_id("CH_VERIFY"),
+    "bump": get_id("CH_BUMP"),
 }
 
 BAD_WORDS = ["死ね", "殺す", "バカ", "ゴミ", "カス"]
@@ -169,3 +170,19 @@ if __name__ == "__main__":
     t.start()
     if TOKEN:
         bot.run(TOKEN)
+
+# --- 定期タスク ---
+    @tasks.loop(seconds=60)
+    async def scheduled_task(self):
+        jst = timezone(timedelta(hours=9), 'JST')
+        now = datetime.now(jst)
+        current_time = now.strftime('%H:%M')
+
+        # 2. Disboardリマインダー (2時間おき)
+        # 偶数時間の05分に通知する例（例: 10:05, 12:05...）
+        if now.hour % 2 == 0 and now.minute == 5:
+            ch_id = CH_IDS.get("bump")
+            if ch_id:
+                ch = self.get_channel(ch_id)
+                if ch:
+                    await ch.send("📢 **Disboardリマインダー**\n前回のbumpから2時間が経過しました！\n`/bump` を実行してサーバーを浮上させましょう！")

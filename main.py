@@ -97,6 +97,22 @@ class MyBot(commands.Bot):
             ch = self.get_channel(CH_IDS["greeting"])
             if ch: await ch.send("🍱 12:00になりました。お昼休憩にしましょう！")
 
+            if current_time == "14:00":
+            # CH_NEWS または特定のチャンネルにメッセージを送る
+            ch = self.get_channel(CH_IDS["news"]) # 送りたいチャンネルIDに合わせて変更してください
+            if ch:
+                await ch.send("☕ 14:00になりました！お問い合わせを開始します")
+                # もしBumpリマインダーも兼ねたい場合は以下のように追記
+                # await ch.send("📢 ついでに `/bump` も確認しておきましょう！")
+
+                if current_time == "22:00":
+            # CH_NEWS または特定のチャンネルにメッセージを送る
+            ch = self.get_channel(CH_IDS["news"]) # 送りたいチャンネルIDに合わせて変更してください
+            if ch:
+                await ch.send("☕ 14:00になりました！お問い合わせを終了します")
+                # もしBumpリマインダーも兼ねたい場合は以下のように追記
+                # await ch.send("📢 ついでに `/bump` も確認しておきましょう！")
+
     # --- イベント処理 ---
     async def on_member_join(self, member):
         ch = self.get_channel(CH_IDS["welcome"])

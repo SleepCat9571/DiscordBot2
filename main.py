@@ -47,7 +47,6 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # 起動時にスラッシュコマンドをDiscordに同期
         await self.tree.sync()
         if not self.scheduled_task.is_running():
             self.scheduled_task.start()
@@ -55,22 +54,19 @@ class MyBot(commands.Bot):
     async def on_ready(self):
         print(f"✅ ログイン成功: {self.user.name}")
 
-    # --- 定期タスク (08:00 ニュース＆天気 / 12:00 挨拶) ---
+    # --- 定期タスク (すべての時間指定通知をここに集約) ---
     @tasks.loop(seconds=60)
     async def scheduled_task(self):
-        # 強制的に日本時間を取得
         jst = timezone(timedelta(hours=9), 'JST')
-        now_jst = datetime.now(jst)
-        current_time = now_jst.strftime('%H:%M')
+        now = datetime.now(jst)
+        current_time = now.strftime('%H:%M')
         
-        # ログで時間を確認
         print(f"時刻チェック: {current_time}")
 
-        # 朝 08:00 配信
+        # A. 朝 08:00 配信 (ニュース・天気)
         if current_time == "08:00" and CH_IDS["news"]:
             ch = self.get_channel(CH_IDS["news"])
             if ch:
-                # 天気取得
                 w_msg = "🌅 **朝の定期連絡 (天気)**\n"
                 for area, code in WEATHER_AREAS.items():
                     try:
@@ -79,7 +75,6 @@ class MyBot(commands.Bot):
                         w_msg += f"・{area}: {w}\n"
                     except: w_msg += f"・{area}: 取得失敗\n"
 
-                # ニュース取得 (Google News RSS)
                 n_msg = "\n📰 **最新のニュース速報**\n"
                 try:
                     res = requests.get("https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja", timeout=10)
@@ -89,29 +84,30 @@ class MyBot(commands.Bot):
                         link = item.find('link').text
                         n_msg += f"・{title}\n<{link}>\n"
                 except: n_msg += "ニュース取得エラー\n"
-                
                 await ch.send(w_msg + n_msg)
 
-        # 昼 12:00 挨拶
+        # B. 昼 12:00 挨拶
         if current_time == "12:00" and CH_IDS["greeting"]:
             ch = self.get_channel(CH_IDS["greeting"])
             if ch: await ch.send("🍱 12:00になりました。お昼休憩にしましょう！")
 
-            if current_time == "14:00":
-            # CH_NEWS または特定のチャンネルにメッセージを送る
-            ch = self.get_channel(CH_IDS["news"]) # 送りたいチャンネルIDに合わせて変更してください
-            if ch:
-                await ch.send("☕ 14:00になりました！お問い合わせを開始します")
-                # もしBumpリマインダーも兼ねたい場合は以下のように追記
-                # await ch.send("📢 ついでに `/bump` も確認しておきましょう！")
+        # C. 14:00 お問い合わせ開始
+        if current_time == "14:00" and CH_IDS["news"]:
+            ch = self.get_channel(CH_IDS["news"])
+            if ch: await ch.send("☕ 14:00になりました！お問い合わせを開始します")
 
-                if current_time == "22:00":
-            # CH_NEWS または特定のチャンネルにメッセージを送る
-            ch = self.get_channel(CH_IDS["news"]) # 送りたいチャンネルIDに合わせて変更してください
-            if ch:
-                await ch.send("☕ 14:00になりました！お問い合わせを終了します")
-                # もしBumpリマインダーも兼ねたい場合は以下のように追記
-                # await ch.send("📢 ついでに `/bump` も確認しておきましょう！")
+        # D. 22:00 お問い合わせ終了
+        if current_time == "22:00" and CH_IDS["news"]:
+            ch = self.get_channel(CH_IDS["news"])
+            if ch: await ch.send("🌙 22:00になりました！お問い合わせを終了します")
+
+        # E. Disboardリマインダー (2時間おき)
+        if now.hour % 2 == 0 and now.minute == 5:
+            ch_id = CH_IDS.get("bump")
+            if ch_id:
+                ch = self.get_channel(ch_id)
+                if ch:
+                    await ch.send("📢 **Disboardリマインダー**\n前回のbumpから2時間が経過しました！\n`/bump` を実行してサーバーを浮上させましょう！")
 
     # --- イベント処理 ---
     async def on_member_join(self, member):
@@ -128,7 +124,6 @@ class MyBot(commands.Bot):
 
     async def on_message(self, message):
         if message.author.bot: return
-        # 禁止用語監視
         if any(word in message.content for word in BAD_WORDS):
             try:
                 await message.delete()
@@ -138,17 +133,15 @@ class MyBot(commands.Bot):
             except: pass
         await self.process_commands(message)
 
-# インスタンス作成
 bot = MyBot()
+
+# --- 4. コマンド登録 ---
 
 @bot.tree.command(name="verify", description="サーバーの認証（ロール付与）を行います")
 async def verify(interaction: discord.Interaction):
-    # 3秒ルール対策：まず「考え中...」状態にする
     await interaction.response.defer(ephemeral=True)
-    
     if interaction.channel_id != CH_IDS["verify"]:
         return await interaction.followup.send("専用の認証チャンネルで使ってください。", ephemeral=True)
-    
     role = discord.utils.get(interaction.guild.roles, name="Member")
     if role:
         await interaction.user.add_roles(role)
@@ -158,13 +151,14 @@ async def verify(interaction: discord.Interaction):
 
 @bot.tree.command(name="timer", description="指定秒数後に通知します")
 async def timer(interaction: discord.Interaction, 秒: int):
-    # 応答を保留にする
     await interaction.response.send_message(f"⏰ {秒}秒のタイマーを開始。")
     await asyncio.sleep(秒)
-    # 3秒以上かかる処理の後は followup または channel.send を使う
     await interaction.channel.send(f"🔔 {interaction.user.mention} 時間になりました！")
-    
-# 管理者用同期コマンド (!sync)
+
+@bot.tree.command(name="test_bump", description="Bumpリマインダーの表示テスト")
+async def test_bump(interaction: discord.Interaction):
+    await interaction.response.send_message("📢 **Disboardリマインダー（テスト）**\n`/bump` の時間です！", ephemeral=False)
+
 @bot.command()
 @commands.is_owner()
 async def sync(ctx):
@@ -177,23 +171,3 @@ if __name__ == "__main__":
     t.start()
     if TOKEN:
         bot.run(TOKEN)
-
-# --- 定期タスク ---
-    @tasks.loop(seconds=60)
-    async def scheduled_task(self):
-        jst = timezone(timedelta(hours=9), 'JST')
-        now = datetime.now(jst)
-        current_time = now.strftime('%H:%M')
-
-        # 2. Disboardリマインダー (2時間おき)
-        # 偶数時間の05分に通知する例（例: 10:05, 12:05...）
-        if now.hour % 2 == 0 and now.minute == 5:
-            ch_id = CH_IDS.get("bump")
-            if ch_id:
-                ch = self.get_channel(ch_id)
-                if ch:
-                    await ch.send("📢 **Disboardリマインダー**\n前回のbumpから2時間が経過しました！\n`/bump` を実行してサーバーを浮上させましょう！")
-
-@bot.tree.command(name="test_bump", description="Bumpリマインダーの表示テスト")
-async def test_bump(interaction: discord.Interaction):
-    await interaction.response.send_message("📢 **Disboardリマインダー（テスト）**\n`/bump` の時間です！", ephemeral=False)

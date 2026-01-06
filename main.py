@@ -171,3 +171,37 @@ if __name__ == "__main__":
     t.start()
     if TOKEN:
         bot.run(TOKEN)
+
+# --- Bump管理用の変数（メモリ上に保存） ---
+last_bump_time = None
+
+@bot.tree.command(name="bump_done", description="Bumpしたことをボットに知らせ、2時間後の通知を予約します")
+async def bump_done(interaction: discord.Interaction):
+    global last_bump_time
+    last_bump_time = datetime.now(timezone(timedelta(hours=9)))
+    
+    await interaction.response.send_message(
+        "✅ Bump確認しました！2時間後（" + 
+        (last_bump_time + timedelta(hours=2)).strftime('%H:%M') + 
+        "）にお知らせしますね！", ephemeral=False
+    )
+
+# --- scheduled_task の修正 ---
+    @tasks.loop(seconds=60)
+    async def scheduled_task(self):
+        global last_bump_time
+        jst = timezone(timedelta(hours=9), 'JST')
+        now = datetime.now(jst)
+        
+        # もし最後のリセットからちょうど120分経っていたら通知
+        if last_bump_time:
+            elapsed = now - last_bump_time
+            # 120分から121分の間に1回だけ通知
+            if timedelta(minutes=120) <= elapsed < timedelta(minutes=121):
+                ch_id = CH_IDS.get("bump")
+                if ch_id:
+                    ch = self.get_channel(ch_id)
+                    if ch:
+                        await ch.send("📢 **前回のBumpから2時間経ちました！**\n次回の `/bump` が可能です！")
+                        # 通知したらタイマーをリセット
+                        last_bump_time = None

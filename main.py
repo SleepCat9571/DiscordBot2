@@ -90,16 +90,10 @@ class MyBot(commands.Bot):
         if current_time == "12:00" and CH_IDS["greeting"]:
             ch = self.get_channel(CH_IDS["greeting"])
             if ch: await ch.send("🍱 12:00になりました。お昼休憩にしましょう！")
-
-        # C. 14:00 お問い合わせ開始
-        if current_time == "14:00" and CH_IDS["news"]:
-            ch = self.get_channel(CH_IDS["news"])
-            if ch: await ch.send("☕ 14:00になりました！お問い合わせを開始します")
-
         # D. 22:00 お問い合わせ終了
         if current_time == "22:00" and CH_IDS["news"]:
             ch = self.get_channel(CH_IDS["news"])
-            if ch: await ch.send("🌙 22:00になりました！お問い合わせを終了します")
+            if ch: await ch.send("🌙 22:00になりました！")
 
         # E. Disboardリマインダー (2時間おき)
         if now.hour % 2 == 0 and now.minute == 5:

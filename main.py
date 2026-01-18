@@ -141,10 +141,6 @@ async def timer(interaction: discord.Interaction, 秒: int):
     await asyncio.sleep(秒)
     await interaction.channel.send(f"🔔 {interaction.user.mention} 時間になりました！")
 
-@bot.tree.command(name="test_bump", description="Bumpリマインダーの表示テスト")
-async def test_bump(interaction: discord.Interaction):
-    await interaction.response.send_message("📢 **Disboardリマインダー（テスト）**\n`/bump` の時間です！", ephemeral=False)
-
 @bot.command()
 @commands.is_owner()
 async def sync(ctx):

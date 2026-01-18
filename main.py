@@ -95,14 +95,6 @@ class MyBot(commands.Bot):
             ch = self.get_channel(CH_IDS["news"])
             if ch: await ch.send("🌙 22:00になりました！")
 
-        # E. Disboardリマインダー (2時間おき)
-        if now.hour % 2 == 0 and now.minute == 5:
-            ch_id = CH_IDS.get("bump")
-            if ch_id:
-                ch = self.get_channel(ch_id)
-                if ch:
-                    await ch.send("📢 **Disboardリマインダー**\n前回のbumpから2時間が経過しました！\n`/bump` を実行してサーバーを浮上させましょう！")
-
     # --- イベント処理 ---
     async def on_member_join(self, member):
         ch = self.get_channel(CH_IDS["welcome"])
